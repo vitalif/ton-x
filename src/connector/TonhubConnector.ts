@@ -125,6 +125,13 @@ export type TonhubTransactionResponse = {
     type: 'invalid_session'
 };
 
+export type TonhubTransactionJob = {
+    type: 'success',
+    boc: string,
+} | {
+    type: 'invalid_session'
+};
+
 export type TonhubSignRequest = {
     seed: string,
     appPublicKey: string,
@@ -340,6 +347,22 @@ export class TonhubConnector {
     }
 
     requestTransaction = async (request: TonhubTransactionRequest): Promise<TonhubTransactionResponse> => {
+        const job = await this.requestTransactionNowait(request);
+        if (job.type === 'invalid_session') {
+            return { type: 'invalid_session' };
+        }
+
+        // Await result
+        let result = await this._awaitJobState(request.appPublicKey, job.boc);
+        if (result.type === 'completed') {
+            return { type: 'success', response: result.result };
+        } else if (result.type === 'rejected') {
+            return { type: 'rejected' };
+        }
+        return { type: 'expired' };
+    }
+
+    requestTransactionNowait = async (request: TonhubTransactionRequest): Promise<TonhubTransactionJob> => {
         const sessionId = idFromSeed(request.seed);
 
         // Check session
@@ -407,14 +430,7 @@ export class TonhubConnector {
             job: boc,
         }));
 
-        // Await result
-        let result = await this._awaitJobState(request.appPublicKey, boc);
-        if (result.type === 'completed') {
-            return { type: 'success', response: result.result };
-        } else if (result.type === 'rejected') {
-            return { type: 'rejected' };
-        }
-        return { type: 'expired' };
+        return { type: 'success', boc };
     }
 
     requestSign = async (request: TonhubSignRequest): Promise<TonhubSignResponse> => {
